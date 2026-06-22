@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 
+import artisynth.core.femmodels.FemModel;
 import artisynth.core.femmodels.FemNode3d;
 import artisynth.core.inverse.InverseManager;
 import artisynth.core.inverse.TrackingController;
@@ -67,6 +68,8 @@ public class FemTongueMriDemo extends HexTongueDemo {
       super.build (args);
       tongue.setGravity (0, 0, 0);
       mech.setGravity (0, 0, 0);
+      // AUTO incompressibility blows up under inverse load (inverted elements)
+      tongue.setIncompressible (FemModel.IncompMethod.OFF);
       myManifestFile = resolveManifestFile (args);
    }
 

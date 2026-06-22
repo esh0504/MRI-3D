@@ -103,14 +103,29 @@ bin\artisynth.bat -model artisynth.models.tongue3d.FemTongueMriDemo [ <...>\mri_
 → `mriTracking` 패널 확인 → 정지시각 21초 → Play → **File → Save output probe data**
 → `subject1_computed_excitations.txt`(활성도).
 
-### 6b. 프레임별 독립 정적 inverse  `6_static_inverse.py` (Jython)
-각 프레임을 독립적으로 평형까지 풀어 활성도를 기록.
-1. 위 6a처럼 모델을 로드(`mriTracking` 패널이 떠 있어야 함).
-2. ArtiSynth **Scripts → Run Script… → `6_static_inverse.py`**.
-3. 출력: `mri_fit/activations_static_per_frame.csv` (frame,time,근육별 활성도).
+### 6b. 프레임별 독립 정적 inverse
 
-> ArtiSynth 실행/빌드/문제해결 상세는 `README_registration_transfer.md`,
-> 도커로 ArtiSynth forward까지 돌리는 법은 `README.docker.md` 참고.
+**Docker (GUI 없음, 권장):**
+
+```bash
+docker compose build tongue-artisynth    # 최초 1회
+docker compose run --rm inverse-test     # 1프레임 테스트
+docker compose run --rm inverse          # 전체 → activations_static_per_frame.csv
+```
+
+**ArtiSynth GUI + Jython** (`6_static_inverse.py`):
+
+1. FemTongueMriDemo + manifest 로드 (`mriTracking` 패널 확인)
+2. **Scripts → Run Script… → `6_static_inverse.py`**
+
+**Python API (호스트/WSL, JDK+ArtiSynth 필요):**
+
+```bash
+pip install JPype1
+ARTISYNTH_HOME=/opt/artisynth/artisynth_core python3 artisynth_static_inverse.py
+```
+
+자세한 Docker 설정: `README.docker.md`
 
 ## Step 7 — 활성도 정리  `7_summarize_activations.py`
 

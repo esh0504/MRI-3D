@@ -1,46 +1,71 @@
-# Mounts the data + project folders and wires the container to the host's
-# ArtiSynth (for the forward-model client).  Adjust the left-hand host paths
-# if yours differ.  Run:  docker compose run --rm tongue
+# Tongue_Inverse Docker services
+#
+# 빌드 (최초 1회, ArtiSynth clone+compile 포함 — 수 분 소요):
+#   docker compose build tongue-artisynth
+#
+# 정적 muscle inverse (GUI 없음):
+#   docker compose run --rm inverse
+#   docker compose run --rm inverse-test    # 1프레임만 테스트
+#
+# 셸 진입 (forward / 파이프라인 등):
+#   docker compose run --rm tongue-artisynth
+#
+# 경로 오버라이드: 프로젝트 루트에 .env 파일 생성 (docker.env.example 참고)
+
+x-artisynth-common: &artisynth-common
+  build:
+    context: .
+    dockerfile: Dockerfile.artisynth
+  volumes:
+    - ${PROJECT_DIR:-.}:/work
+    # MRI 마스크 (Step 1–2). .env 에 MRI_MASKS=... 설정 후 아래 주석 해제
+    # - ${MRI_MASKS}:/data/masks:ro
+  environment: &artisynth-env
+    ARTISYNTH_HOME: /opt/artisynth/artisynth_core
+    MRI_ROOT: /data/masks
+    MRI_OUT: /work
+    JVM_XMX: ${JVM_XMX:-4g}
+    SETTLE_T: ${SETTLE_T:-0.4}
+    MAX_FRAMES: ${MAX_FRAMES:-0}
+  working_dir: /work
+  stdin_open: true
+  tty: true
+
 services:
+  # 경량 Python만 (호스트 ArtiSynth 소켓 클라이언트)
   tongue:
     build: .
     volumes:
-      - "C:/Users/d11/Project/Tongue_Inverse:/work"                       # outputs + scripts share
-      - "E:/Datasets/XAI/data/GT_Segmentations/Subject1:/data/masks:ro"   # mask_*.mat
-      - "C:/Users/d11/artisynth:/data/artisynth:ro"                       # for tongue.obj (retarget)
+      - ${PROJECT_DIR:-.}:/work
+      # - ${MRI_MASKS}:/data/masks:ro
+      # - ${ARTISYNTH_HOST_TREE}:/data/artisynth:ro
     environment:
       MRI_ROOT: /data/masks
       MRI_OUT: /work
       FORWARD_DIR: /work/forward
-      TONGUE_OBJ: /data/artisynth/artisynth_core/src/artisynth/models/tongue3d/geometry/tongue.obj
-      TONGUE_HOST: host.docker.internal   # host's ArtiSynth forward_server
+      TONGUE_OBJ: ${TONGUE_OBJ:-/data/artisynth/artisynth_core/src/artisynth/models/tongue3d/geometry/tongue.obj}
+      TONGUE_HOST: host.docker.internal
       TONGUE_PORT: "5005"
-    # host.docker.internal is automatic on Docker Desktop (Win/Mac).
-    # On Linux Docker, this line maps it to the host:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     working_dir: /work
     stdin_open: true
     tty: true
 
-  # All-in-one: Linux ArtiSynth (native solver) + Python + JPype in ONE container.
-  # artisynth_forward.py runs fully inside (no host ArtiSynth needed).
-  # Build: docker compose build tongue-artisynth   (heavy: clones+builds ArtiSynth)
+  # ArtiSynth + JPype 올인원 (이미지 안에 ArtiSynth 설치됨)
   tongue-artisynth:
-    build:
-      context: .
-      dockerfile: Dockerfile.artisynth
-    volumes:
-      - "C:/Users/d11/Project/Tongue_Inverse:/work"
-      - "E:/Datasets/XAI/data/GT_Segmentations/Subject1:/data/masks:ro"
-      - "C:/Users/d11/artisynth:/opt/artisynth"          # YOUR ArtiSynth tree (READ-WRITE for one-time lib fetch)
+    <<: *artisynth-common
+
+  # Step 6b: 프레임별 정적 inverse → mri_fit/activations_static_per_frame.csv
+  inverse:
+    <<: *artisynth-common
+    command: ["python3", "artisynth_static_inverse.py"]
+
+  # 빠른 연결 테스트 (1프레임만)
+  inverse-test:
+    <<: *artisynth-common
     environment:
-      ARTISYNTH_HOME: /opt/artisynth/artisynth_core
-      TONGUE_MODEL: artisynth.models.tongue3d.HexTongueDemo
-      MRI_ROOT: /data/masks
-      MRI_OUT: /work
-      FORWARD_DIR: /work/forward
-      JVM_XMX: 4g
-    working_dir: /work
-    stdin_open: true
-    tty: true
+      <<: *artisynth-env
+      MAX_FRAMES: "1"
+      SETTLE_T: "0.4"
+    command: ["python3", "artisynth_static_inverse.py"]

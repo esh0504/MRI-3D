@@ -85,26 +85,30 @@ def _find_tongue(root):
     return None
 
 
+def _jclass(name):
+    import jpype
+    return jpype.JClass(name)
+
+
 def init(model=None):
     """Start the JVM, build the model, cache tongue / exciters / mesh. Returns muscle names."""
     import jpype
-    import jpype.imports          # noqa: enables 'import' of java packages
-    from jpype import JArray, JString
-    _start_jvm()
-    model = model or TONGUE_MODEL
-    from artisynth.core.driver import Main
-    from java.util import ArrayList
 
+    _start_jvm()
+    JString = _jclass("java.lang.String")
+    JArray = jpype.JArray
+    Main = _jclass("artisynth.core.driver.Main")
+    ArrayList = _jclass("java.util.ArrayList")
+
+    model = model or TONGUE_MODEL
     m = Main.getMain()
     if m is None:
-        # full static init (solver defaults, paths) via the normal headless entry
         try:
             Main.main(JArray(JString)(["-noGui"]))
         except Exception as e:
             print("note: Main.main(-noGui) raised:", e)
         m = Main.getMain()
     if m is None:
-        # fallback: construct a headless Main directly
         m = Main("forward", False)
         m.start(ArrayList())
 
@@ -128,7 +132,7 @@ def init(model=None):
     # solve can invert elements under load (detJ<0). StableFemMuscleTongueDemo uses
     # OFF -> do the same here. Configurable via INCOMP env (OFF/AUTO/ELEMENT/NODAL).
     try:
-        from artisynth.core.femmodels import FemModel
+        FemModel = _jclass("artisynth.core.femmodels.FemModel")
         mode = os.environ.get("INCOMP", "OFF").upper()
         tongue.setIncompressible(getattr(FemModel.IncompMethod, mode))
         try:

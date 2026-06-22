@@ -1,16 +1,11 @@
-# keep the image small: only scripts + requirements are needed
-mri_fit/
+.git
+__pycache__
+*.pyc
+.mypy_cache
 forward/
 retargeted_objs/
-*.png
 *.gif
-*.npy
-*.txt
-*.csv
-*.mat
-__pycache__/
-
-# but the build needs these:
-!requirements.txt
-!*.py
-
+*.png
+hs_err_pid*.log
+mri_fit/*_computed_excitations.txt
+mri_fit/activations_*.png

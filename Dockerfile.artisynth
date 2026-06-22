@@ -1,41 +1,70 @@
-# All-in-one: Java + Python + JPype, using YOUR EXISTING ArtiSynth tree (mounted).
+# All-in-one: JDK + Python + JPype + ArtiSynth (cloned & compiled inside the image).
 #
-# Your compiled ArtiSynth classes are portable JVM bytecode, so they run on Linux
-# as-is (this is why we do NOT rebuild). Only the native solver libs are
-# platform-specific: your tree has lib/Windows64/*.dll, so inside the container
-# you fetch the Linux ones ONCE with updateArtisynthLibs (writes lib/Linux64/*.so).
-# Then artisynth_forward.py runs fully in-container, with your tongue3d AND your
-# custom MRI/inverse classes available.
+# Host에 ArtiSynth를 설치·마운트할 필요 없음.
+# 빌드 시: GitHub clone → Linux 네이티브 lib → 커스텀 MRI/inverse Java 컴파일
 #
-# Build:  docker build -f Dockerfile.artisynth -t tongue-artisynth .   (small/fast)
-# Mount your ArtiSynth tree READ-WRITE so the one-time lib fetch can write to it.
+#   docker compose build tongue-artisynth
+#   docker compose run --rm inverse          # 정적 muscle inverse
+#   docker compose run --rm tongue-artisynth python3 -c "from artisynth_forward import ..."
+#
 FROM eclipse-temurin:21-jdk-jammy
 
+ARG ARTISYNTH_GIT=https://github.com/artisynth/artisynth_core.git
+ARG ARTISYNTH_MODELS_GIT=https://github.com/artisynth/artisynth_models.git
+ARG ARTISYNTH_HOME=/opt/artisynth/artisynth_core
+ARG ARTISYNTH_MODELS=/opt/artisynth/artisynth_models
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip libgomp1 ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+        python3 python3-pip python-is-python3 git make libgomp1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir \
         numpy scipy scikit-image matplotlib imageio JPype1
 
+# --- ArtiSynth core + models (GitHub) ---
+# HexTongueDemo, JawHyoidFemMuscleTongue 등 해부 모델은 artisynth_models 에만 있음.
+RUN git clone --depth 1 "${ARTISYNTH_GIT}" "${ARTISYNTH_HOME}" && \
+    git clone --depth 1 "${ARTISYNTH_MODELS_GIT}" "${ARTISYNTH_MODELS}" && \
+    cp -r "${ARTISYNTH_MODELS}/src/." "${ARTISYNTH_HOME}/src/"
+
+# Linux 네이티브 솔버 (.so) — 빌드 시 한 번만 다운로드
+RUN cd "${ARTISYNTH_HOME}" && \
+    java -cp "lib/vfs2.jar:bin/libraryInstaller.jar" \
+        artisynth.core.driver.LibraryInstaller -updateLibs \
+        -remoteSource https://www.artisynth.org/files/lib/
+
+# --- 이 프로젝트의 커스텀 inverse/MRI Java 소스 ---
+COPY artisynth/src/ ${ARTISYNTH_HOME}/src/
+
+# 커스텀 + 기본 모델 컴파일
+RUN cd "${ARTISYNTH_HOME}" && make
+
+# --- Python 파이프라인 ---
 COPY *.py /work/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-# strip any CR (in case the file was saved with Windows line endings) + make executable
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
- && chmod +x /usr/local/bin/docker-entrypoint.sh
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV PYTHONPATH=/work \
     MPLBACKEND=Agg \
-    ARTISYNTH_HOME=/opt/artisynth/artisynth_core \
+    ARTISYNTH_HOME=${ARTISYNTH_HOME} \
     TONGUE_MODEL=artisynth.models.tongue3d.HexTongueDemo \
-    SETTLE_T=0.4 \
-    MAXSTEP=0.005 \
-    NRAMP=20 \
+    MRI_MODEL=artisynth.models.tongue3d.FemTongueMriDemo \
+    MRI_MANIFEST=/work/mri_fit/mri_fit_tongue.properties \
+    TARGETS_CSV=/work/mri_fit/frame_targets_m.csv \
+    OUT_CSV=/work/mri_fit/activations_static_per_frame.csv \
+    SETTLE_T=0.6 \
+    MAXSTEP=0.001 \
+    NRAMP=30 \
     INCOMP=OFF \
+    MAX_EXCITATION_JUMP=0.02 \
+    FPS=5.0 \
+    MAX_FRAMES=0 \
     JVM_XMX=4g \
     MRI_ROOT=/data/masks \
     MRI_OUT=/work \
-    FORWARD_DIR=/work/forward
+    FORWARD_DIR=/work/forward \
+    TONGUE_OBJ=${ARTISYNTH_HOME}/src/artisynth/models/tongue3d/geometry/tongue.obj
 
 WORKDIR /work
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
