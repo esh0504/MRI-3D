@@ -1,0 +1,16 @@
+# keep the image small: only scripts + requirements are needed
+mri_fit/
+forward/
+retargeted_objs/
+*.png
+*.gif
+*.npy
+*.txt
+*.csv
+*.mat
+__pycache__/
+
+# but the build needs these:
+!requirements.txt
+!*.py
+

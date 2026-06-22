@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# generated outputs (regenerable by the scripts)
+*.npy
+*.gif
+qc_trajectories.png
+resampled_markers.png
+lift_frames3d.png
+lift_motion.gif
+retarget_frames3d.png
+retarget_midsag.png
+retarget_motion.gif
+compare_mri_vs_retarget.gif
+diag_*.png
+tongue_targets.txt
+retargeted_objs/
+forward/
+pose*.obj
+
+# ArtiSynth inverse outputs
+mri_fit/activations_*
+mri_fit/*_computed_excitations.txt
+mri_fit/*_tracked_positions.txt
+mri_fit/*_source_positions.txt
+mri_fit/*_target_positions.txt
+mri_fit/*_fit_error.txt
+
+# scratch / misc
+_archive/
+*_test.obj
+*_mock*.obj
+_synthetic_*.txt
+.DS_Store

@@ -1,0 +1,7 @@
+# Python analysis pipeline deps (NOT the Jython/ArtiSynth side).
+# Pinned to a mutually-compatible, numpy-2-aware set (Python 3.11-3.13).
+numpy==2.2.6
+scipy==1.15.3
+scikit-image==0.25.2
+matplotlib==3.10.9
+imageio==2.37.3

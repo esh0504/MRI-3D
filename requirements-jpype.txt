@@ -1,0 +1,4 @@
+# For artisynth_forward.py (in-process ArtiSynth via JPype).
+# Needs a JDK + the compiled ArtiSynth tree on the SAME machine (not the slim Docker).
+JPype1>=1.5.0
+numpy>=1.26

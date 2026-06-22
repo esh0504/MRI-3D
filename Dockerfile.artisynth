@@ -1,0 +1,42 @@
+# All-in-one: Java + Python + JPype, using YOUR EXISTING ArtiSynth tree (mounted).
+#
+# Your compiled ArtiSynth classes are portable JVM bytecode, so they run on Linux
+# as-is (this is why we do NOT rebuild). Only the native solver libs are
+# platform-specific: your tree has lib/Windows64/*.dll, so inside the container
+# you fetch the Linux ones ONCE with updateArtisynthLibs (writes lib/Linux64/*.so).
+# Then artisynth_forward.py runs fully in-container, with your tongue3d AND your
+# custom MRI/inverse classes available.
+#
+# Build:  docker build -f Dockerfile.artisynth -t tongue-artisynth .   (small/fast)
+# Mount your ArtiSynth tree READ-WRITE so the one-time lib fetch can write to it.
+FROM eclipse-temurin:21-jdk-jammy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip libgomp1 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir \
+        numpy scipy scikit-image matplotlib imageio JPype1
+
+COPY *.py /work/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# strip any CR (in case the file was saved with Windows line endings) + make executable
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+ && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENV PYTHONPATH=/work \
+    MPLBACKEND=Agg \
+    ARTISYNTH_HOME=/opt/artisynth/artisynth_core \
+    TONGUE_MODEL=artisynth.models.tongue3d.HexTongueDemo \
+    SETTLE_T=0.4 \
+    MAXSTEP=0.005 \
+    NRAMP=20 \
+    INCOMP=OFF \
+    JVM_XMX=4g \
+    MRI_ROOT=/data/masks \
+    MRI_OUT=/work \
+    FORWARD_DIR=/work/forward
+
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["bash"]
