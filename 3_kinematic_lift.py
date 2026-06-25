@@ -15,14 +15,17 @@ Input : tongue_targets.npy  (T,N,3)  midsagittal markers tip->root, x=col y=up z
 Output: tongue_lift_3d.npy  (T, N, Nz, 3) lifted surface node trajectories (mm)
         lift_frames3d.png    3 representative frames, 3D
         lift_motion.gif      surface deforming over the sequence (fixed view)
+
+입력/출력: output/Subject{N}/ (MRI_SUBJECT로 선택)
 """
 import os
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
+from mri_paths import MRI_OUT, print_paths
 
-OUT_DIR  = os.environ.get("MRI_OUT", r"C:\Users\d11\Project\Tongue_Inverse")
+OUT_DIR  = MRI_OUT
 MM_PER_PX = 1.164      # data-driven, from registration (model tongue size / image span)
 NZ        = 15         # lateral samples per side-to-side span
 HALF_W    = 30.0       # max lateral half-width (mm); model tongue spans +-34mm
@@ -56,6 +59,7 @@ def lift_frame(curve_mm):
 
 
 def main():
+    print_paths()
     t = np.load(os.path.join(OUT_DIR, "tongue_targets.npy"))   # (T,N,3) px
     T, N, _ = t.shape
     xy = t[..., :2] * MM_PER_PX                                 # px->mm

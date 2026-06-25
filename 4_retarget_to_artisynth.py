@@ -12,6 +12,8 @@ ArtiSynth muscle-activation inverse.
 
 Outputs (OUT_DIR): retargeted_tongue.npy (T,Nverts,3 mm), retarget_midsag.png,
 retarget_frames3d.png, retarget_motion.gif (real-time @ FPS), retargeted_objs/*.obj
+
+입력/출력: output/Subject{N}/ (MRI_SUBJECT로 선택)
 """
 import os, csv
 import numpy as np
@@ -21,10 +23,10 @@ import imageio.v2 as imageio
 from scipy.interpolate import RBFInterpolator
 from scipy.signal import savgol_filter
 from scipy.ndimage import uniform_filter1d
+from mri_paths import MRI_OUT, MRI_FIT_DIR, TONGUE_OBJ, print_paths
 
-OUT_DIR = os.environ.get("MRI_OUT", r"C:\Users\d11\Project\Tongue_Inverse")
-OBJ     = os.environ.get("TONGUE_OBJ",
-          r"C:\Users\d11\artisynth\artisynth_core\src\artisynth\models\tongue3d\geometry\tongue.obj")
+OUT_DIR = MRI_OUT
+OBJ     = TONGUE_OBJ
 FPS      = 5.0          # actual frame rate (user-confirmed) -> time axis & gif speed
 REST     = 0
 NCTRL    = 13
@@ -79,13 +81,14 @@ def model_dorsal_curve(V, nb=NCTRL):
 
 
 def main():
+    print_paths()
     V, F = load_obj(OBJ)
     Vxz = V[:, [0, 2]]
     dorsal = model_dorsal_curve(V)
 
     tgt = np.load(os.path.join(OUT_DIR, "tongue_targets.npy"))
     T, N, _ = tgt.shape
-    to_model = affine_image_to_model(os.path.join(OUT_DIR, "mri_fit", "registration.csv"))
+    to_model = affine_image_to_model(os.path.join(MRI_FIT_DIR, "registration.csv"))
 
     mri = np.stack([resample(to_model(tgt[k, :, :2]), NCTRL) for k in range(T)], 0)  # (T,NCTRL,2)
     delta = mri - mri[REST]

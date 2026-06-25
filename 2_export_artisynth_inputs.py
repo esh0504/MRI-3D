@@ -32,6 +32,12 @@ Run JavaScript-free; just numpy/scipy. After running, copy OUT_DIR/mri_fit to th
 ArtiSynth working dir and launch:
     artisynth -model artisynth.models.jawTongue.JawFemMuscleTongueMriDemo \
               -Dartisynth.mriManifest=/path/to/mri_fit.properties
+
+경로 (기본 /work 기준):
+  GT   datasets/GT_Segmentations/Subject{N}/
+  OUT  output/Subject{N}/mri_fit/
+
+환경변수: MRI_SUBJECT=Subject1|2|…|5, MRI_ROOT, MRI_OUT (선택)
 """
 
 import os, re, glob
@@ -40,14 +46,14 @@ import scipy.io as sio
 from collections import deque
 from scipy.ndimage import binary_dilation, label
 from tongue_contour import precise_contour
+from mri_paths import MRI_ROOT, MRI_OUT, MRI_FIT_DIR, CLIP_ID, print_paths
 
 # ----------------------------- CONFIG ---------------------------------------
-ROOT       = os.environ.get("MRI_ROOT", r"E:\Datasets\XAI\data\GT_Segmentations\Subject1")
-OUT_DIR    = os.environ.get("MRI_OUT",  r"C:\Users\d11\Project\Tongue_Inverse")
+ROOT       = MRI_ROOT
+OUT_DIR    = MRI_OUT
 VAR_NAME   = "mask_frame"
 LBL = dict(head=1, palate=2, jaw=3, tongue=4, airway=5, teeth=6)
 FPS        = 5.0          # actual frame rate (user-confirmed)
-CLIP_ID    = "subject1"
 REST_FRAME = 1            # 1-based frame used to anchor the static registration
 N_TONGUE_CONTOUR = 40    # exported tongue-surface points (ArtiSynth resamples down)
 INTERFACE_DILATE = 1
@@ -135,7 +141,9 @@ def centroid(mask, lbl):
 
 
 def main():
-    out = os.path.join(OUT_DIR, "mri_fit"); os.makedirs(out, exist_ok=True)
+    print_paths()
+    out = MRI_FIT_DIR
+    os.makedirs(out, exist_ok=True)
     fs = frames();  assert fs, f"no masks under {ROOT}"
     H = load(fs[0]).shape[0]
     print(f"[info] {len(fs)} frames, H={H}")

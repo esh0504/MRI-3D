@@ -7,6 +7,9 @@ Single side-by-side GIF, frame-synced @ actual frame rate:
   LEFT  = original RT-MRI segmentation (7-label colour) + tracked tongue markers
   RIGHT = retargeted ArtiSynth tongue mesh (from retargeted_tongue.npy)
 Output: compare_mri_vs_retarget.gif
+
+입력 GT: datasets/GT_Segmentations/Subject{N}/
+출력: output/Subject{N}/ (MRI_SUBJECT로 선택)
 """
 import os, re, glob
 import numpy as np
@@ -15,11 +18,11 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import imageio.v2 as imageio
+from mri_paths import MRI_ROOT, MRI_OUT, TONGUE_OBJ, print_paths
 
-ROOT    = os.environ.get("MRI_ROOT", r"E:\Datasets\XAI\data\GT_Segmentations\Subject1")
-OUT_DIR = os.environ.get("MRI_OUT",  r"C:\Users\d11\Project\Tongue_Inverse")
-OBJ     = os.environ.get("TONGUE_OBJ",
-          r"C:\Users\d11\artisynth\artisynth_core\src\artisynth\models\tongue3d\geometry\tongue.obj")
+ROOT    = MRI_ROOT
+OUT_DIR = MRI_OUT
+OBJ     = TONGUE_OBJ
 FPS  = 5.0
 STEP = 1                       # 1 = every frame (real-time); 2 = lighter file
 CMAP = ListedColormap(["black","red","green","blue","orange","purple","skyblue"])
@@ -34,6 +37,7 @@ def load_faces(path):
     return np.array(F)
 
 def main():
+    print_paths()
     fs = sorted(glob.glob(os.path.join(ROOT,"mask_*.mat")), key=natkey)
     masks = [sio.loadmat(f)["mask_frame"] for f in fs]
     T = len(masks)

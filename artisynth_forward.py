@@ -34,14 +34,17 @@ import os
 import glob
 import numpy as np
 
-ARTISYNTH_HOME = os.environ.get("ARTISYNTH_HOME", r"C:\Users\d11\artisynth\artisynth_core")
+ARTISYNTH_HOME = os.environ.get("ARTISYNTH_HOME", "/opt/artisynth/artisynth_core")
 TONGUE_MODEL   = os.environ.get("TONGUE_MODEL", "artisynth.models.tongue3d.HexTongueDemo")
 SETTLE_T       = float(os.environ.get("SETTLE_T", "0.4"))
 JVM_XMX        = os.environ.get("JVM_XMX", "4g")
-MAXSTEP        = float(os.environ.get("MAXSTEP", "0.005"))   # solver max step (s); small = stable
+# MAXSTEP: FEM 적분 스텝(초). inverse(6번)와 동일하게 맞춰야 같은 변형이 재현됨.
+MAXSTEP        = float(os.environ.get("MAXSTEP", "0.001"))   # solver max step (s); small = stable
 NRAMP          = int(os.environ.get("NRAMP", "20"))          # ramp activation in N steps (avoids element inversion)
+INCOMP         = os.environ.get("INCOMP", "OFF").upper()
 
-_S = {"main": None, "tongue": None, "exciters": None, "names": None, "mesh": None}
+_S = {"main": None, "tongue": None, "exciters": None, "names": None,
+      "mesh": None, "faces": None}
 
 
 def _start_jvm():
@@ -146,11 +149,23 @@ def init(model=None):
     exlist = tongue.getMuscleExciters()
     exciters = [exlist.get(i) for i in range(exlist.size())]
     names = [str(e.getName()) for e in exciters]
+    mesh = tongue.getSurfaceMesh()
     _S.update(main=m, tongue=tongue, exciters=exciters, names=names,
-              mesh=tongue.getSurfaceMesh())
-    print("ArtiSynth ready: %d exciters, %d surface verts. order: %s"
-          % (len(exciters), _S["mesh"].numVertices(), ",".join(names)))
+              mesh=mesh, faces=_extract_faces(mesh))
+    print("ArtiSynth ready: %d exciters, %d surface verts, %d FEM nodes. order: %s"
+          % (len(exciters), mesh.numVertices(), tongue.numNodes(), ",".join(names)))
     return list(names)
+
+
+def _extract_faces(mesh):
+    """표면 메쉬 face 인덱스 (F,3) — rest에서 한 번만 추출(토폴로지는 불변)."""
+    faces = mesh.getFaces()
+    nf = faces.size()
+    F = np.empty((nf, 3), dtype=int)
+    for i in range(nf):
+        vi = faces.get(i).getVertexIndices()
+        F[i, 0] = vi[0]; F[i, 1] = vi[1]; F[i, 2] = vi[2]
+    return F
 
 
 def _deactivate_probes(root):
@@ -172,6 +187,7 @@ def muscle_names():
 
 
 def _read_mesh():
+    """현재 표면 메쉬 정점 위치 (N,3) + face (F,3). 단위 metres."""
     mesh = _S["mesh"]
     verts = mesh.getVertices()
     nv = verts.size()
@@ -179,20 +195,36 @@ def _read_mesh():
     for i in range(nv):
         p = verts.get(i).getPosition()
         out[i, 0] = p.x; out[i, 1] = p.y; out[i, 2] = p.z
-    faces = mesh.getFaces()
-    nf = faces.size()
-    F = np.empty((nf, 3), dtype=int)
-    for i in range(nf):
-        vi = faces.get(i).getVertexIndices()
-        F[i, 0] = vi[0]; F[i, 1] = vi[1]; F[i, 2] = vi[2]
-    return out, F
+    return out, _S["faces"]
 
 
-def muscle_power(a, settle=None):
-    """activations (list in muscle order, or dict {name:val}) -> (verts (N,3), faces (F,3)).
+def read_surface():
+    """현재 표면 메쉬 (verts (N,3), faces (F,3)). metres."""
+    return _read_mesh()
 
-    Each call: reset to rest, apply activations open-loop, run the real ArtiSynth
-    solver to equilibrium, return the deformed surface mesh (model metres)."""
+
+def read_nodes():
+    """현재 FEM 전체 노드 위치 (Nn,3) 와 노드 번호 (Nn,). 단위 metres.
+    노드 '번호'는 inverse(6번)가 저장한 타깃 node_numbers와 매칭하는 키."""
+    tongue = _S["tongue"]
+    nn = tongue.numNodes()
+    pos = np.empty((nn, 3))
+    nums = np.empty((nn,), dtype=int)
+    nodes = tongue.getNodes()
+    for i in range(nn):
+        nd = nodes.get(i)
+        p = nd.getPosition()
+        pos[i, 0] = p.x; pos[i, 1] = p.y; pos[i, 2] = p.z
+        nums[i] = int(nd.getNumber())
+    return pos, nums
+
+
+def apply_activation(a, settle=None):
+    """활성도를 open-loop로 가해 평형까지 시뮬. 성공 여부(bool) 반환.
+
+    매 호출: rest로 reset → 활성도를 NRAMP 단계로 서서히 올림(급가하면 element 뒤집힘)
+    → 최종값으로 hold. 실제 ArtiSynth forward 솔버 사용. 이후 read_nodes/read_surface로
+    원하는 위치를 읽으면 됨."""
     if _S["main"] is None:
         init()
     if settle is None:
@@ -203,21 +235,31 @@ def muscle_power(a, settle=None):
     exciters = _S["exciters"]
     m.reset()
     _deactivate_probes(m.getRootModel())
-    # RAMP the activation up gradually (instant full load inverts FEM elements),
-    # then hold at full to settle. Forward dynamics, real ArtiSynth solver.
+    # play(time)은 지속시간(현재시각+time). 각 단계는 seg만큼만 전진해야 총 램프가 settle.
+    # (seg*k는 단계마다 누적 재시뮬 → ~NRAMP/2 배 낭비. 최종 평형값만 쓰므로 정확도 무관.)
     seg = float(settle) / NRAMP
+    ok = True
     for k in range(1, NRAMP + 1):
         frac = float(k) / NRAMP
         for i, e in enumerate(exciters):
             e.setExcitation((float(a[i]) if i < len(a) else 0.0) * frac)
-        m.playAndWait(seg * k)                 # play to absolute time seg*k
+        m.playAndWait(seg)
         ex = m.getSimulationException()
         if ex is not None:
             print("WARNING: solver exception during ramp step %d: %s" % (k, ex))
             print("  -> try lower activation, larger NRAMP, or smaller MAXSTEP")
+            ok = False
             break
-    else:
+    if ok:
         m.playAndWait(float(settle) * 2.0)     # hold full activation to settle
+        if m.getSimulationException() is not None:
+            ok = False
+    return ok
+
+
+def muscle_power(a, settle=None):
+    """activations -> (verts (N,3), faces (F,3)). apply_activation 후 표면 메쉬 반환."""
+    apply_activation(a, settle=settle)
     return _read_mesh()
 
 

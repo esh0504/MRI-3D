@@ -34,3 +34,7 @@ _archive/
 *_mock*.obj
 _synthetic_*.txt
 .DS_Store
+
+
+datasets/
+output/

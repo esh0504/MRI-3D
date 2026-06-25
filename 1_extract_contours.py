@@ -9,7 +9,12 @@ Uses the PRECISE sub-pixel airway-facing surface extractor (tongue_contour.py).
 Outputs: tongue_targets.npy (T,N,3), tongue_targets.txt (NumericInputProbe),
          qc_trajectories.png, resampled_markers.png
 Image-mm space: x=col*MM_PER_PX, y=(H-1-row)*MM_PER_PX, z=0. Up=+y, anterior=small x.
-Env overrides: MRI_ROOT, MRI_OUT.
+
+경로 (기본 /work 기준):
+  GT   datasets/GT_Segmentations/Subject{N}/mask_*.mat
+  OUT  output/Subject{N}/
+
+환경변수: MRI_SUBJECT=Subject1|2|…|5, MRI_ROOT, MRI_OUT (선택)
 """
 import os, re, glob
 import numpy as np
@@ -17,9 +22,10 @@ import scipy.io as sio
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tongue_contour import precise_contour
+from mri_paths import MRI_ROOT, MRI_OUT, print_paths
 
-ROOT      = os.environ.get("MRI_ROOT", r"E:\Datasets\XAI\data\GT_Segmentations\Subject1")
-OUT_DIR   = os.environ.get("MRI_OUT",  r"C:\Users\d11\Project\Tongue_Inverse")
+ROOT      = MRI_ROOT
+OUT_DIR   = MRI_OUT
 VAR_NAME  = "mask_frame"
 N_MARKERS = 25
 MM_PER_PX = 1.164        # data-driven (from registration); was 1.0 placeholder
@@ -34,6 +40,7 @@ def load(p):
 
 
 def main():
+    print_paths()
     os.makedirs(OUT_DIR, exist_ok=True)
     fs = frames(); assert fs, f"no masks under {ROOT}"
     H = load(fs[0]).shape[0]

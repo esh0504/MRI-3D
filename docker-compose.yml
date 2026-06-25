@@ -22,8 +22,10 @@ x-artisynth-common: &artisynth-common
     # - ${MRI_MASKS}:/data/masks:ro
   environment: &artisynth-env
     ARTISYNTH_HOME: /opt/artisynth/artisynth_core
-    MRI_ROOT: /data/masks
-    MRI_OUT: /work
+    MRI_SUBJECT: ${MRI_SUBJECT:-Subject1}
+    # /work 볼륨에 datasets/ 가 있으면 아래 경로 사용 (구 /data/masks 마운트 대체)
+    MRI_ROOT: /work/datasets/GT_Segmentations/${MRI_SUBJECT:-Subject1}
+    MRI_OUT: /work/output/${MRI_SUBJECT:-Subject1}
     JVM_XMX: ${JVM_XMX:-4g}
     SETTLE_T: ${SETTLE_T:-0.4}
     MAX_FRAMES: ${MAX_FRAMES:-0}
@@ -40,8 +42,9 @@ services:
       # - ${MRI_MASKS}:/data/masks:ro
       # - ${ARTISYNTH_HOST_TREE}:/data/artisynth:ro
     environment:
-      MRI_ROOT: /data/masks
-      MRI_OUT: /work
+      MRI_SUBJECT: ${MRI_SUBJECT:-Subject1}
+      MRI_ROOT: /work/datasets/GT_Segmentations/${MRI_SUBJECT:-Subject1}
+      MRI_OUT: /work/output/${MRI_SUBJECT:-Subject1}
       FORWARD_DIR: /work/forward
       TONGUE_OBJ: ${TONGUE_OBJ:-/data/artisynth/artisynth_core/src/artisynth/models/tongue3d/geometry/tongue.obj}
       TONGUE_HOST: host.docker.internal

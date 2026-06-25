@@ -31,6 +31,8 @@ import os
 import sys
 import time
 
+from mri_paths import MRI_FIT_DIR, MRI_OUT, print_paths
+
 # =========================================================================
 # 하이퍼파라미터 (모두 환경변수로 덮어쓸 수 있음: VAR=값 python3 6_static_inverse.py)
 # =========================================================================
@@ -43,17 +45,17 @@ MRI_MODEL = os.environ.get("MRI_MODEL", "artisynth.models.tongue3d.FemTongueMriD
 # MRI_MANIFEST: 모델이 읽는 매니페스트(.properties). 윤곽 CSV, 정합(registration), 가중치 등을 가리킴.
 MRI_MANIFEST = os.environ.get(
     "MRI_MANIFEST",
-    os.path.join(os.path.dirname(__file__), "mri_fit", "mri_fit_tongue.properties"),
+    os.path.join(MRI_FIT_DIR, "mri_fit_tongue.properties"),
 )
 # TARGETS_CSV: 프레임별 MRI 정중시상 타깃 좌표(모델 metres). 형식: frame,idx,x,y,z
 TARGETS_CSV = os.environ.get(
     "TARGETS_CSV",
-    os.path.join(os.path.dirname(__file__), "mri_fit", "frame_targets_m.csv"),
+    os.path.join(MRI_FIT_DIR, "frame_targets_m.csv"),
 )
 # OUT_CSV: 결과(프레임별 근육 활성도) 저장 경로.
 OUT_CSV = os.environ.get(
     "OUT_CSV",
-    os.path.join(os.path.dirname(__file__), "mri_fit", "activations_static_per_frame.csv"),
+    os.path.join(MRI_OUT, "activations_static_per_frame.csv"),
 )
 # CONTROLLER: 모델이 만든 TrackingController(역해 컨트롤러)의 이름. 못 찾으면 타입으로 fallback.
 CONTROLLER = os.environ.get("CONTROLLER", "mriTracking")
@@ -108,6 +110,7 @@ _S = {
     "tongue": None,     # FEM 혀 모델(FemMuscleModel)
     "rest_pos": None,   # {target_idx: (x,y,z)} 각 타깃 노드의 FEM rest 위치(최초 1회 캡처)
     "n_targets": None,  # 실제 사용하는 타깃 개수
+    "node_numbers": None,  # 타깃 idx -> FEM 노드 번호 (forward 비교에서 매칭용)
 }
 
 
@@ -427,9 +430,16 @@ def init(manifest=None, model=None):
         tpts = ctrl.getTargetPoints()
         n_targets = min(tpts.size(), 11)
 
+    # 타깃 idx -> FEM 노드 번호 (forward 시뮬에서 같은 노드를 찾아 비교하기 위함)
+    node_numbers = []
+    for i in range(n_targets):
+        src = tpts.get(i).getSourceComp()
+        node_numbers.append(int(src.getNumber()) if src is not None else -1)
+
     _S.update(
         main=m, root=root, ctrl=ctrl, tpts=tpts, exciters=exciters, names=names,
         tongue=tongue, rest_pos=rest_pos, n_targets=n_targets,
+        node_numbers=node_numbers,
     )
     mode = "independent (reset/frame)" if INDEPENDENT_FRAMES else "continuous (no reset)"
     _log(
@@ -518,7 +528,11 @@ def _settle_ramped(m, tpts, goals, n, label=""):
     for k in range(1, nramp + 1):
         frac = float(k) / nramp
         _set_targets_blend(tpts, rest, goals, frac, n)
-        m.playAndWait(seg * k)
+        # play(time)은 '현재시각 + time'까지 도는 지속시간(Scheduler.play).
+        # 각 단계는 seg 만큼만 전진해야 총 램프 시간이 ramp_t가 됨.
+        # (seg*k는 단계마다 누적 재시뮬 → 총 ramp_t*(nramp+1)/2 로 ~6배 낭비. 최종
+        #  goal에서 수렴한 값만 기록되므로 정확도 영향 없이 step만 절약된다.)
+        m.playAndWait(seg)
         ex = m.getSimulationException()
         if ex is not None:
             _log("  FAILED at ramp %d/%d: %s" % (k, nramp, ex))
@@ -591,14 +605,14 @@ def run_static_inverse(
     if _S["main"] is None:
         init()
 
-    targets_csv = targets_csv or TARGETS_CSV # TARGETS_CSV = /work/mri_fit/frame_targets_m.csv
+    print_paths()
+    targets_csv = targets_csv or TARGETS_CSV
     out_csv = out_csv or OUT_CSV # OUT_CSV = /work/mri_fit/activations_static_per_frame.csv
     settle = SETTLE_T if settle is None else settle
     fps = FPS if fps is None else fps # FPS = 5.0
     max_frames = MAX_FRAMES if max_frames is None else max_frames # MAX_FRAMES = 0
 
     frames = load_targets(targets_csv)
-    print(f"targets_csv: {targets_csv}, frames: {len(frames)}")
     frame_ids = sorted(frames.keys())
     if max_frames > 0:
         frame_ids = frame_ids[:max_frames]
@@ -613,6 +627,7 @@ def run_static_inverse(
              % (rest_frame_id, RBF_LEN_M, _S["n_targets"]))
 
     records = []
+    goal_records = []   # (frame_id, [(x,y,z), ...]) — forward 비교용 타깃 목표 위치
     n = _S["n_targets"] or min(_S["tpts"].size(), 11)
     t_run = time.time()
 
@@ -639,6 +654,8 @@ def run_static_inverse(
         if not ok and not INDEPENDENT_FRAMES:
             _log("  -> mesh corrupted; use INDEPENDENT_FRAMES=1 or fix params")
         records.append((fr, acts))
+        if FIT_MODE == "surface3d":
+            goal_records.append((fr, [goals[i] for i in range(n)]))
 
         top = sorted(acts.items(), key=lambda kv: -kv[1])[:3]
         _log("  top: " + ", ".join("%s=%.3f" % (nm, v) for nm, v in top))
@@ -649,11 +666,27 @@ def run_static_inverse(
             _log("[checkpoint] %d frames -> %s" % (k, ckpt))
 
     _write_csv(out_csv, names, records, fps)
+    if FIT_MODE == "surface3d" and goal_records:
+        _write_goals_npz(out_csv, goal_records)
     _log(
         "DONE. %d frames in %.1fs -> %s"
         % (len(records), time.time() - t_run, out_csv)
     )
     return out_csv
+
+
+def _write_goals_npz(out_csv, goal_records):
+    """forward 비교용 타깃 목표 위치를 .npz로 저장.
+    저장: frame_ids (T,), node_numbers (n,), goals (T, n, 3) — 모두 모델 metres.
+    goals[t,i] = 프레임 t에서 타깃 i(FEM 노드 node_numbers[i])가 도달해야 할 3D 위치."""
+    import numpy as np
+    path = out_csv.replace(".csv", "_goals.npz")
+    frame_ids = np.array([fr for fr, _ in goal_records], dtype=int)
+    goals = np.array([g for _, g in goal_records], dtype=float)  # (T, n, 3)
+    node_numbers = np.array(_S["node_numbers"], dtype=int)
+    np.savez(path, frame_ids=frame_ids, node_numbers=node_numbers, goals=goals)
+    _log("[out] goals -> %s  (%d frames x %d nodes)"
+         % (path, goals.shape[0], goals.shape[1]))
 
 
 def muscle_names():
