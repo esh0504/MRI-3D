@@ -40,6 +40,9 @@ ACT_CSV = os.environ.get(
     "ACT_CSV", os.path.join(MRI_OUT, "activations_static_per_frame.csv"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "0"))
 EXPORT_OBJ_EVERY = int(os.environ.get("EXPORT_OBJ_EVERY", "0"))
+# 병렬: 이 워커가 맡을 프레임만 처리(frame_ids[FRAME_WORKER::FRAME_NWORKERS]).
+FRAME_NWORKERS = int(os.environ.get("FRAME_NWORKERS", "1"))
+FRAME_WORKER = int(os.environ.get("FRAME_WORKER", "0"))
 
 
 def load_activations(path):
@@ -66,6 +69,10 @@ def main():
     frame_ids, names, acts = load_activations(ACT_CSV)
     if MAX_FRAMES > 0:
         frame_ids, acts = frame_ids[:MAX_FRAMES], acts[:MAX_FRAMES]
+    if FRAME_NWORKERS > 1:
+        sel = slice(FRAME_WORKER, None, FRAME_NWORKERS)
+        frame_ids, acts = frame_ids[sel], acts[sel]
+        print("[worker %d/%d] %d frames" % (FRAME_WORKER, FRAME_NWORKERS, len(frame_ids)))
     T = len(frame_ids)
     print("[fwd] %d frames, %d muscles from %s" % (T, len(names), ACT_CSV))
 

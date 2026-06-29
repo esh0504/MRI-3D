@@ -99,6 +99,14 @@ SUBW = tuple(float(x) for x in os.environ.get("SUBW", "1,1,1").split(","))
 # REST_FRAME: 변위 기준이 되는 rest 프레임 id. 0이면 가장 작은 프레임 id를 자동 사용.
 REST_FRAME = int(os.environ.get("REST_FRAME", "0"))
 
+# --- 병렬 처리(프레임 분할) ---
+# FRAME_NWORKERS / FRAME_WORKER: 병렬 러너가 프레임을 워커로 나눌 때 사용.
+#   이 워커는 전체 프레임 중 frame_ids[FRAME_WORKER::FRAME_NWORKERS]만 처리(라운드로빈).
+#   rest 프레임 기준은 항상 '전체' 프레임에서 잡으므로 분할해도 목표 좌표가 동일하게 유지됨.
+#   기본 1/0 = 단일 프로세스(전체 처리). 보통 parallel_runner.py가 자동 설정.
+FRAME_NWORKERS = int(os.environ.get("FRAME_NWORKERS", "1"))
+FRAME_WORKER = int(os.environ.get("FRAME_WORKER", "0"))
+
 # 한 번 init() 하면 채워지는 전역 핸들 캐시(여러 프레임에서 재사용).
 _S = {
     "main": None,       # ArtiSynth Main (시뮬레이션 드라이버)
@@ -613,13 +621,19 @@ def run_static_inverse(
     max_frames = MAX_FRAMES if max_frames is None else max_frames # MAX_FRAMES = 0
 
     frames = load_targets(targets_csv)
-    frame_ids = sorted(frames.keys())
+    all_ids = sorted(frames.keys())
     if max_frames > 0:
-        frame_ids = frame_ids[:max_frames]
+        all_ids = all_ids[:max_frames]
+    # rest 프레임은 '전체' 기준으로 먼저 결정(워커 분할 전) → 분할해도 목표 좌표 동일
+    rest_frame_id = REST_FRAME if REST_FRAME in frames else all_ids[0]
+    # 병렬: 이 워커가 맡을 프레임만 추림(라운드로빈). 단일 프로세스면 전체.
+    frame_ids = all_ids[FRAME_WORKER::FRAME_NWORKERS] if FRAME_NWORKERS > 1 else all_ids
 
     names = _S["names"]
     total = len(frame_ids)
-    rest_frame_id = REST_FRAME if REST_FRAME in frames else frame_ids[0]
+    if FRAME_NWORKERS > 1:
+        _log("[worker %d/%d] frames: %d of %d total"
+             % (FRAME_WORKER, FRAME_NWORKERS, total, len(all_ids)))
     _log("Loaded %d frames from %s" % (total, targets_csv))
     _log("Output -> %s" % out_csv)
     if FIT_MODE == "surface3d":
