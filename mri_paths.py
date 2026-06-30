@@ -84,7 +84,76 @@ def _resolve_mri_out():
 
 MRI_ROOT = _resolve_mri_root()
 MRI_OUT = _resolve_mri_out()
-MRI_FIT_DIR = os.path.join(MRI_OUT, "mri_fit")
+# step 2 의 ArtiSynth 입력 번들 폴더(번호 접두사 포함).
+MRI_FIT_DIR = os.path.join(MRI_OUT, "2_mri_fit")
+
+
+def _sanitize_legacy_env():
+    """컨테이너 이미지(Dockerfile)가 박아둔 구(舊) 경로 env 를 무력화.
+
+    OUT_CSV / TARGETS_CSV / MRI_MANIFEST / ACT_CSV 가 '현재 MRI_OUT 바깥'(예: 예전
+    /work/mri_fit)을 가리키면 stale 로 보고 제거 → 각 스크립트의 번호 붙은 기본 경로가
+    적용된다. MRI_OUT 아래를 가리키는 의도적 지정은 그대로 둔다."""
+    base = os.path.abspath(MRI_OUT) + os.sep
+    for k in ("OUT_CSV", "TARGETS_CSV", "MRI_MANIFEST", "ACT_CSV"):
+        v = os.environ.get(k)
+        if v and not os.path.abspath(v).startswith(base):
+            os.environ.pop(k, None)
+            print("[paths] ignore stale %s=%s (컨테이너 기본값) → 번호 경로 사용" % (k, v),
+                  file=sys.stderr)
+
+
+_sanitize_legacy_env()
+
+
+def out(n, name):
+    """번호 접두사 출력 경로: MRI_OUT/{n}_{name}.
+    각 스크립트는 자기 번호로 산출물을 저장해 어느 스텝이 만든 파일인지 드러낸다.
+    예) out(1, 'tongue_targets.npy') -> output/SubjectX/1_tongue_targets.npy"""
+    return os.path.join(MRI_OUT, "%d_%s" % (n, name))
+
+
+def clean_all(verbose=True):
+    """MRI_OUT 내부를 전부 비운다(폴더 자체는 유지). 전체 파이프라인 시작 시 사용."""
+    if not os.path.isdir(MRI_OUT):
+        os.makedirs(MRI_OUT, exist_ok=True)
+        return
+    import shutil
+    removed = 0
+    for name in os.listdir(MRI_OUT):
+        p = os.path.join(MRI_OUT, name)
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p)
+            else:
+                os.remove(p)
+            removed += 1
+        except Exception as e:
+            print("[clean] skip %s (%s)" % (p, e), file=sys.stderr)
+    if verbose:
+        print("[clean] wiped %d entries under %s" % (removed, MRI_OUT))
+
+
+def clean_step(n, verbose=True):
+    """이 스텝(N_*) 출력만 삭제. 개별 스텝 재실행 시 자기 산출물만 정리."""
+    import shutil
+    prefix = "%d_" % n
+    removed = 0
+    if os.path.isdir(MRI_OUT):
+        for name in os.listdir(MRI_OUT):
+            if not name.startswith(prefix):
+                continue
+            p = os.path.join(MRI_OUT, name)
+            try:
+                if os.path.isdir(p) and not os.path.islink(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+                removed += 1
+            except Exception as e:
+                print("[clean] skip %s (%s)" % (p, e), file=sys.stderr)
+    if verbose and removed:
+        print("[clean] step %d: removed %d previous outputs" % (n, removed))
 
 ARTISYNTH_HOME = os.environ.get("ARTISYNTH_HOME", "/opt/artisynth/artisynth_core")
 _default_tongue_obj = os.path.join(

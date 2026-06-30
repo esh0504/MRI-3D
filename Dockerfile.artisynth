@@ -45,14 +45,15 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# 경로(OUT_CSV/TARGETS_CSV/MRI_MANIFEST/MRI_OUT/MRI_ROOT)는 이미지에 박지 않는다.
+# mri_paths.py 가 MRI_SUBJECT 기준으로 output/Subject{N}/ 아래 번호 경로를 자동 결정.
+# (예전엔 여기서 /work/mri_fit 를 강제해 산출물이 번호 없이 한곳에 섞였음)
 ENV PYTHONPATH=/work \
     MPLBACKEND=Agg \
     ARTISYNTH_HOME=${ARTISYNTH_HOME} \
     TONGUE_MODEL=artisynth.models.tongue3d.HexTongueDemo \
     MRI_MODEL=artisynth.models.tongue3d.FemTongueMriDemo \
-    MRI_MANIFEST=/work/mri_fit/mri_fit_tongue.properties \
-    TARGETS_CSV=/work/mri_fit/frame_targets_m.csv \
-    OUT_CSV=/work/mri_fit/activations_static_per_frame.csv \
+    MRI_SUBJECT=Subject1 \
     SETTLE_T=0.6 \
     MAXSTEP=0.001 \
     NRAMP=30 \
@@ -61,9 +62,6 @@ ENV PYTHONPATH=/work \
     FPS=5.0 \
     MAX_FRAMES=0 \
     JVM_XMX=4g \
-    MRI_ROOT=/data/masks \
-    MRI_OUT=/work \
-    FORWARD_DIR=/work/forward \
     TONGUE_OBJ=${ARTISYNTH_HOME}/src/artisynth/models/tongue3d/geometry/tongue.obj
 
 WORKDIR /work

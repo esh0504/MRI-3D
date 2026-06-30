@@ -45,7 +45,7 @@ import numpy as np
 import scipy.io as sio
 from collections import deque
 from scipy.ndimage import binary_dilation, label
-from tongue_contour import precise_contour
+from tongue_contour import precise_contour, anatomical_landmarks
 from mri_paths import MRI_ROOT, MRI_OUT, MRI_FIT_DIR, CLIP_ID, print_paths
 
 # ----------------------------- CONFIG ---------------------------------------
@@ -72,6 +72,18 @@ MODEL_ANCHORS_M = {
     "root":   (0.13075, 0.06732),
 }
 N_TONGUE_NODES = 11      # = len(DEFAULT_TONGUE_TARGET_NODES) for the static inverse
+# Composite (mm) model = tongue.obj*1000 then +X_OFFSET_MM in x. So mm anchors are
+# derived from the metres anchors as (x*1000 + X_OFFSET_MM, z*1000). Keep ONE source
+# of truth (metres) so registration.csv (mm) and registration_m.csv stay consistent.
+X_OFFSET_MM = 2.0
+# Known model-frame landmark coords in METRES [x, z] (tongue-only model = obj raw).
+# Add more here (or via landmark_map.csv) as you identify corresponding model points.
+MODEL_LANDMARKS_M = {
+    "tip":    (0.05839, 0.09952),
+    "dorsum": (0.09818, 0.11085),
+    "root":   (0.13075, 0.06732),
+    # "floor": (?, ?),   # fill in if/when you find the model correspondence
+}
 # ----------------------------------------------------------------------------
 
 _NB8 = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
@@ -140,6 +152,94 @@ def centroid(mask, lbl):
     return None if len(rc)==0 else rc.mean(0)
 
 
+# ---- image<->model landmark registration (N>=3, least-squares affine) ----------
+def model_m_to_mm(xz_m):
+    """metres [x,z] -> composite-model mm [x,z] (x gets +X_OFFSET_MM)."""
+    return (xz_m[0] * 1000.0 + X_OFFSET_MM, xz_m[1] * 1000.0)
+
+
+def load_landmark_map():
+    """Optional user-defined correspondences. Looked up at MRI_FIT_DIR/landmark_map.csv
+    then MRI_OUT/landmark_map.csv. Columns: label,imageX,imageY,modelX_m,modelZ_m
+    (model coords in METRES). Rows with blank/NaN model coords are ignored.
+    Returns {label:(imageX,imageY,modelX_m,modelZ_m)} or {} if no file."""
+    import csv
+    for p in (os.path.join(MRI_FIT_DIR, "landmark_map.csv"),
+              os.path.join(OUT_DIR, "landmark_map.csv")):
+        if not os.path.isfile(p):
+            continue
+        out = {}
+        with open(p, newline="") as f:
+            for r in csv.DictReader(f):
+                try:
+                    out[r["label"].strip()] = (
+                        float(r["imageX"]), float(r["imageY"]),
+                        float(r["modelX_m"]), float(r["modelZ_m"]))
+                except (ValueError, KeyError, TypeError):
+                    continue          # blank model coords -> skip this row
+        print(f"[reg] using user landmark_map.csv: {p} ({len(out)} usable rows)")
+        return out
+    return {}
+
+
+def fit_affine(img_xy, mod_xz):
+    """Least-squares affine image[x,y] -> model[x,z]. img_xy (N,2), mod_xz (N,2).
+    Returns (A (3,2), rms_residual_in_model_units, per_point_residual (N,))."""
+    M = np.column_stack([img_xy, np.ones(len(img_xy))])
+    A, *_ = np.linalg.lstsq(M, mod_xz, rcond=None)
+    pred = M @ A
+    res = np.linalg.norm(pred - mod_xz, axis=1)
+    return A, float(np.sqrt((res ** 2).mean())), res
+
+
+def build_registration(rest_mask, rest_tongue):
+    """Assemble image<->model correspondences (metres) for registration.
+    Priority: user landmark_map.csv > auto anatomical landmarks (tip/dorsum/root
+    [+floor if model coord known]). Falls back to rest_tongue extremes if needed.
+    Returns (names, img_xy(N,2), mod_xz_m(N,2))."""
+    H = rest_mask.shape[0]
+    user = load_landmark_map()
+    names, img, mod = [], [], []
+    if len(user) >= 3:
+        for k, (ix, iy, mx, mz) in user.items():
+            names.append(k); img.append([ix, iy]); mod.append([mx, mz])
+        return names, np.array(img), np.array(mod)
+
+    # auto: anatomical landmarks from the rest mask, matched to known model coords
+    lm = anatomical_landmarks(rest_mask) or {}
+    for k in ("tip", "dorsum", "root", "floor"):
+        if k in lm and k in MODEL_LANDMARKS_M:
+            r, c = lm[k]
+            names.append(k); img.append([c, (H - 1) - r]); mod.append(list(MODEL_LANDMARKS_M[k]))
+    if len(names) >= 3:
+        return names, np.array(img), np.array(mod)
+
+    # last-resort fallback: tongue extremes (old behavior)
+    tip = rest_tongue[0]; root = rest_tongue[-1]
+    apex = rest_tongue[np.argmax(rest_tongue[:, 1])]
+    names = ["tip", "dorsum", "root"]
+    img = [tip, apex, root]
+    mod = [MODEL_LANDMARKS_M["tip"], MODEL_LANDMARKS_M["dorsum"], MODEL_LANDMARKS_M["root"]]
+    return names, np.array(img), np.array(mod)
+
+
+def write_landmark_template(rest_mask):
+    """Write landmark_map_template.csv seeded with rest-frame image coords and known
+    model metres so the user can fill in extra correspondences (e.g. floor)."""
+    H = rest_mask.shape[0]
+    lm = anatomical_landmarks(rest_mask) or {}
+    path = os.path.join(MRI_FIT_DIR, "landmark_map_template.csv")
+    with open(path, "w") as f:
+        f.write("label,imageX,imageY,modelX_m,modelZ_m\n")
+        for k in ("tip", "dorsum", "root", "floor"):
+            if k not in lm:
+                continue
+            r, c = lm[k]; ix, iy = c, (H - 1) - r
+            mx, mz = MODEL_LANDMARKS_M.get(k, ("", ""))
+            f.write(f"{k},{ix:.3f},{iy:.3f},{mx},{mz}\n")
+    print(f"[out] {path}  (fill model coords + add rows, save as landmark_map.csv)")
+
+
 def main():
     print_paths()
     out = MRI_FIT_DIR
@@ -152,9 +252,11 @@ def main():
     fl = open(os.path.join(out, "landmarks.csv"), "w"); fl.write("frame,label,x,y\n")
 
     rest_tongue = None
+    rest_mask = None
     tongues = {}                         # fi -> (N,2) image xy, for frame_targets
     for fi, fp in enumerate(fs, start=1):
         m = load(fp)
+        if fi == REST_FRAME: rest_mask = m
         # tongue
         tc = tongue_contour(m)
         if tc is not None:
@@ -174,18 +276,25 @@ def main():
     fc.close(); fl.close()
     print(f"[out] {out}/contours.csv\n[out] {out}/landmarks.csv")
 
-    # ---- registration.csv : static anchors from REST_FRAME tongue extremes ----
+    # ---- registration : N>=3 landmark correspondences, least-squares affine ----
     assert rest_tongue is not None, "rest frame tongue contour missing"
-    tip = rest_tongue[0]                                  # anterior end
-    root = rest_tongue[-1]                                # posterior end
-    apex = rest_tongue[np.argmax(rest_tongue[:,1])]       # highest (dorsum)
-    img_anchor = {"tip":tip, "dorsum":apex, "root":root}
+    assert rest_mask is not None, "rest frame mask missing"
+    write_landmark_template(rest_mask)
+    reg_names, reg_img, reg_mod_m = build_registration(rest_mask, rest_tongue)
+    # fit affine (image[x,y] -> model[x,z], metres) and report residual
+    A_m, rms_m, res_m = fit_affine(reg_img, reg_mod_m)
+    print(f"[reg] {len(reg_names)} landmarks {reg_names} | RMS residual "
+          f"{rms_m*1000:.2f} mm (worst {res_m.max()*1000:.2f} mm)")
+    if len(reg_names) > 3:
+        print("[reg] (N>3: over-determined least-squares fit — more robust)")
+
+    # registration.csv (composite model, mm) — derived from metres anchors
     with open(os.path.join(out,"registration.csv"),"w") as f:
         f.write("label,imageX,imageY,modelX,modelZ\n")
-        for k in ("tip","dorsum","root"):
-            ix,iy = img_anchor[k]; mx,mz = MODEL_ANCHORS[k]
-            f.write(f"{k},{ix:.3f},{iy:.3f},{mx:.3f},{mz:.3f}\n")
-    print(f"[out] {out}/registration.csv  (rest frame {REST_FRAME})")
+        for k, ixy, mxz in zip(reg_names, reg_img, reg_mod_m):
+            mx, mz = model_m_to_mm(mxz)
+            f.write(f"{k},{ixy[0]:.3f},{ixy[1]:.3f},{mx:.3f},{mz:.3f}\n")
+    print(f"[out] {out}/registration.csv  (rest frame {REST_FRAME}, {len(reg_names)} anchors)")
 
     # ---- manifest ----
     dur = len(fs)/FPS
@@ -213,19 +322,17 @@ maxExcitationJump=0.05
     with open(os.path.join(out,"mri_fit.properties"),"w") as f: f.write(props)
     print(f"[out] {out}/mri_fit.properties  (duration {dur:.2f}s)")
 
-    # sanity: report image->model scale implied by the 3 anchors
-    ia = np.array([img_anchor[k] for k in ("tip","dorsum","root")])
-    ma = np.array([MODEL_ANCHORS[k] for k in ("tip","dorsum","root")])
-    di = np.linalg.norm(ia[0]-ia[2]); dm = np.linalg.norm(ma[0]-ma[2])
-    print(f"[stat] tip-root span: image {di:.1f}px -> model {dm:.1f}mm  => {dm/di:.3f} mm/px")
+    # sanity: image->model scale implied by the fitted affine (area-based mm/px)
+    lin = A_m[:2, :]
+    sc = (abs(np.linalg.det(lin)) ** 0.5) * 1000.0
+    print(f"[stat] fitted affine scale ~{sc:.3f} mm/px (from {len(reg_names)} landmarks)")
 
     # ===== tongue-only (metres) inputs: for FemTongueMriDemo + static_inverse =====
     with open(os.path.join(out,"registration_m.csv"),"w") as f:
         f.write("label,imageX,imageY,modelX,modelZ\n")
-        for k in ("tip","dorsum","root"):
-            ix,iy = img_anchor[k]; mx,mz = MODEL_ANCHORS_M[k]
-            f.write(f"{k},{ix:.3f},{iy:.3f},{mx:.6f},{mz:.6f}\n")
-    print(f"[out] {out}/registration_m.csv")
+        for k, ixy, mxz in zip(reg_names, reg_img, reg_mod_m):
+            f.write(f"{k},{ixy[0]:.3f},{ixy[1]:.3f},{mxz[0]:.6f},{mxz[1]:.6f}\n")
+    print(f"[out] {out}/registration_m.csv  ({len(reg_names)} anchors)")
 
     tprops = f"""# Tongue-only MRI fit manifest (metres model: FemTongueMriDemo / HexTongueDemo)
 clipId={CLIP_ID}
@@ -243,11 +350,9 @@ maxExcitationJump=0.05
     print(f"[out] {out}/mri_fit_tongue.properties")
 
     # frame_targets_m.csv : per-frame 11 tongue targets in MODEL METRES (for static_inverse)
-    img_m = np.array([img_anchor[k] for k in ("tip","dorsum","root")])
-    mod_m = np.array([MODEL_ANCHORS_M[k] for k in ("tip","dorsum","root")])
-    A,_,_,_ = np.linalg.lstsq(np.column_stack([img_m, np.ones(3)]), mod_m, rcond=None)
+    # reuse the fitted N-landmark affine A_m (image[x,y] -> model[x,z], metres)
     def to_model_m(xy):
-        return np.column_stack([xy, np.ones(len(xy))]) @ A
+        return np.column_stack([xy, np.ones(len(xy))]) @ A_m
     def resample(c, n):
         d = np.r_[0, np.cumsum(np.hypot(np.diff(c[:,0]), np.diff(c[:,1])))]
         if d[-1] == 0: return np.repeat(c[:1], n, 0)

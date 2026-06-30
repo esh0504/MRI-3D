@@ -20,8 +20,6 @@ COPY *.py /app/
 
 ENV PYTHONPATH=/app \
     MPLBACKEND=Agg \
-    MRI_ROOT=/data/masks \
-    MRI_OUT=/work \
     FORWARD_DIR=/work/forward \
     TONGUE_OBJ=/data/artisynth/artisynth_core/src/artisynth/models/tongue3d/geometry/tongue.obj \
     TONGUE_HOST=host.docker.internal \

@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from mri_paths import MRI_FIT_DIR, MRI_OUT, print_paths
+from mri_paths import MRI_FIT_DIR, MRI_OUT, out, print_paths
 
 # =========================================================================
 # 하이퍼파라미터 (모두 환경변수로 덮어쓸 수 있음: VAR=값 python3 6_static_inverse.py)
@@ -52,10 +52,10 @@ TARGETS_CSV = os.environ.get(
     "TARGETS_CSV",
     os.path.join(MRI_FIT_DIR, "frame_targets_m.csv"),
 )
-# OUT_CSV: 결과(프레임별 근육 활성도) 저장 경로.
+# OUT_CSV: 결과(프레임별 근육 활성도) 저장 경로. (goals npz는 같은 이름 _goals.npz)
 OUT_CSV = os.environ.get(
     "OUT_CSV",
-    os.path.join(MRI_OUT, "activations_static_per_frame.csv"),
+    out(6, "activations_static_per_frame.csv"),
 )
 # CONTROLLER: 모델이 만든 TrackingController(역해 컨트롤러)의 이름. 못 찾으면 타입으로 fallback.
 CONTROLLER = os.environ.get("CONTROLLER", "mriTracking")
@@ -79,7 +79,7 @@ INCOMP = os.environ.get("INCOMP", "OFF").upper()
 # MAX_EXCITATION_JUMP: 한 스텝에서 근육 활성도 변화 상한. 작을수록 부드럽지만 수렴 느림.
 MAX_EXCITATION_JUMP = float(os.environ.get("MAX_EXCITATION_JUMP", "0.02"))
 # INDEPENDENT_FRAMES: True면 프레임마다 rest로 reset(독립 정적해). False면 이어서 풂(연속, 시간 연속성↑).
-INDEPENDENT_FRAMES = os.environ.get("INDEPENDENT_FRAMES", "1").lower() not in ("0", "false", "no")
+INDEPENDENT_FRAMES = os.environ.get("INDEPENDENT_FRAMES", "false").lower() not in ("0", "false", "no")
 # CHECKPOINT_EVERY: N프레임마다 중간 결과 저장. 0이면 끔.
 CHECKPOINT_EVERY = int(os.environ.get("CHECKPOINT_EVERY", "10"))
 

@@ -113,7 +113,7 @@ def _tail(path, k=25):
 def run_inverse(W, threads, xmx, parts, keep):
     targets = os.path.join(mri_paths.MRI_FIT_DIR, "frame_targets_m.csv")
     manifest = os.path.join(mri_paths.MRI_FIT_DIR, "mri_fit_tongue.properties")
-    final_out = os.path.join(mri_paths.MRI_OUT, "activations_static_per_frame.csv")
+    final_out = mri_paths.out(6, "activations_static_per_frame.csv")
     if not os.path.isfile(targets):
         raise SystemExit("타깃 CSV 없음: %s (먼저 2_export 실행)" % targets)
 
@@ -196,7 +196,7 @@ def _merge_goals(part_npzs, final_npz):
 # ----------------------------- forward -----------------------------
 def run_forward(W, threads, xmx, parts, keep):
     act_csv = os.environ.get(
-        "ACT_CSV", os.path.join(mri_paths.MRI_OUT, "activations_static_per_frame.csv"))
+        "ACT_CSV", mri_paths.out(6, "activations_static_per_frame.csv"))
     if not os.path.isfile(act_csv):
         raise SystemExit("활성도 CSV 없음: %s (먼저 inverse 실행)" % act_csv)
 
@@ -229,19 +229,20 @@ def run_forward(W, threads, xmx, parts, keep):
 
 
 def _merge_forward(part_dirs, out_dir):
+    # 워커는 MRI_OUT=wdir 로 돌아 wdir/8_forward_*.npy 를 만든다(8번 번호 규칙).
     node_numbers = faces = None
     recs = {}   # frame_id -> (nodes(Nn,3), surf(Nsv,3), ok)
     for wdir in part_dirs:
-        fp = os.path.join(wdir, "forward_frame_ids.npy")
+        fp = os.path.join(wdir, "8_forward_frame_ids.npy")
         if not os.path.isfile(fp):
             continue
         fids = np.load(fp)
-        nodes = np.load(os.path.join(wdir, "forward_nodes.npy"))
-        surf = np.load(os.path.join(wdir, "forward_surface_verts.npy"))
-        ok = np.load(os.path.join(wdir, "forward_ok.npy"))
+        nodes = np.load(os.path.join(wdir, "8_forward_nodes.npy"))
+        surf = np.load(os.path.join(wdir, "8_forward_surface_verts.npy"))
+        ok = np.load(os.path.join(wdir, "8_forward_ok.npy"))
         if node_numbers is None:
-            node_numbers = np.load(os.path.join(wdir, "forward_node_numbers.npy"))
-            faces = np.load(os.path.join(wdir, "forward_surface_faces.npy"))
+            node_numbers = np.load(os.path.join(wdir, "8_forward_node_numbers.npy"))
+            faces = np.load(os.path.join(wdir, "8_forward_surface_faces.npy"))
         for i, fr in enumerate(fids):
             recs[int(fr)] = (nodes[i], surf[i], bool(ok[i]))
     if not recs:
@@ -251,13 +252,12 @@ def _merge_forward(part_dirs, out_dir):
     surf_all = np.stack([recs[fr][1] for fr in frames], 0)
     ok_all = np.array([recs[fr][2] for fr in frames], dtype=bool)
     os.makedirs(out_dir, exist_ok=True)
-    np.save(os.path.join(out_dir, "forward_nodes.npy"), nodes_all)
-    np.save(os.path.join(out_dir, "forward_node_numbers.npy"), node_numbers)
-    np.save(os.path.join(out_dir, "forward_surface_verts.npy"), surf_all)
-    np.save(os.path.join(out_dir, "forward_surface_faces.npy"), faces)
-    np.save(os.path.join(out_dir, "forward_frame_ids.npy"),
-            np.array(frames, dtype=int))
-    np.save(os.path.join(out_dir, "forward_ok.npy"), ok_all)
+    np.save(mri_paths.out(8, "forward_nodes.npy"), nodes_all)
+    np.save(mri_paths.out(8, "forward_node_numbers.npy"), node_numbers)
+    np.save(mri_paths.out(8, "forward_surface_verts.npy"), surf_all)
+    np.save(mri_paths.out(8, "forward_surface_faces.npy"), faces)
+    np.save(mri_paths.out(8, "forward_frame_ids.npy"), np.array(frames, dtype=int))
+    np.save(mri_paths.out(8, "forward_ok.npy"), ok_all)
     print("[merge] forward %d frames (%d failed) -> %s"
           % (len(frames), int((~ok_all).sum()), out_dir))
 

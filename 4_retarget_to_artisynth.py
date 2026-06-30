@@ -23,10 +23,19 @@ import imageio.v2 as imageio
 from scipy.interpolate import RBFInterpolator
 from scipy.signal import savgol_filter
 from scipy.ndimage import uniform_filter1d
-from mri_paths import MRI_OUT, MRI_FIT_DIR, TONGUE_OBJ, print_paths
+from mri_paths import MRI_OUT, MRI_FIT_DIR, TONGUE_OBJ, out, print_paths
 
 OUT_DIR = MRI_OUT
 OBJ     = TONGUE_OBJ
+# TARGETS_NPY: which dorsal-arc target file (in OUT_DIR) drives the retarget.
+#   default 1_tongue_targets.npy (step-1 per-frame extracted). Use the optical-flow
+#   file tongue_targets_flow.npy (보조 스크립트 산출, 번호 없음) for temporally
+#   consistent motion. Outputs are suffixed with the variant stem when not default.
+TARGETS_NPY = os.environ.get("TARGETS_NPY", out(1, "tongue_targets.npy"))
+_stem = os.path.splitext(os.path.basename(TARGETS_NPY))[0]
+# 변형 태그: "tongue_targets" 뒤에 붙은 접미사만 추출(예: ..._flow -> "_flow", 기본 -> "").
+_after = _stem.split("tongue_targets")[-1].lstrip("_")
+TAG = ("_" + _after) if _after else ""
 FPS      = 5.0          # actual frame rate (user-confirmed) -> time axis & gif speed
 REST     = 0
 NCTRL    = 13
@@ -86,7 +95,8 @@ def main():
     Vxz = V[:, [0, 2]]
     dorsal = model_dorsal_curve(V)
 
-    tgt = np.load(os.path.join(OUT_DIR, "tongue_targets.npy"))
+    tgt = np.load(os.path.join(OUT_DIR, TARGETS_NPY))
+    print(f"[in] targets: {os.path.basename(TARGETS_NPY)}  {tgt.shape}  (output tag='{TAG or 'none'}')")
     T, N, _ = tgt.shape
     to_model = affine_image_to_model(os.path.join(MRI_FIT_DIR, "registration.csv"))
 
@@ -107,8 +117,8 @@ def main():
         d_xz = rbf(Vxz)
         Vd = V.copy(); Vd[:, 0] += d_xz[:, 0]; Vd[:, 2] += d_xz[:, 1]
         deformed[k] = Vd
-    np.save(os.path.join(OUT_DIR, "retargeted_tongue.npy"), deformed)
-    print(f"[out] retargeted_tongue.npy  {deformed.shape}  ({T/FPS:.1f}s @ {FPS}fps)")
+    np.save(out(4, f"retargeted_tongue{TAG}.npy"), deformed)
+    print(f"[out] 4_retargeted_tongue{TAG}.npy  {deformed.shape}  ({T/FPS:.1f}s @ {FPS}fps)")
     disp = np.linalg.norm(deformed - deformed[REST], axis=2)
     # frame-to-frame jitter metric (smoothness)
     jit = np.linalg.norm(np.diff(deformed, axis=0), axis=2).mean()
@@ -126,8 +136,8 @@ def main():
         ax.set_xlabel("x ant-post (mm)"); ax.set_ylabel("z up (mm)")
         if k == 0: ax.legend(fontsize=7)
     fig.suptitle(f"Midsagittal retargeting (smoothed) @ {FPS} fps")
-    fig.savefig(os.path.join(OUT_DIR, "retarget_midsag.png"), dpi=120, bbox_inches="tight")
-    plt.close(fig); print("[out] retarget_midsag.png")
+    fig.savefig(out(4, f"retarget_midsag{TAG}.png"), dpi=120, bbox_inches="tight")
+    plt.close(fig); print(f"[out] 4_retarget_midsag{TAG}.png")
 
     P = deformed.reshape(-1, 3)
     xl=(P[:,0].min(),P[:,0].max()); yl=(P[:,1].min(),P[:,1].max()); zl=(P[:,2].min(),P[:,2].max())
@@ -142,8 +152,8 @@ def main():
     for j,k in enumerate([0, T//2, T-1]):
         draw(fig.add_subplot(1,3,j+1, projection="3d"), k)
     fig.suptitle("ArtiSynth tongue mesh retargeted to MRI (smoothed)")
-    fig.savefig(os.path.join(OUT_DIR,"retarget_frames3d.png"), dpi=120, bbox_inches="tight")
-    plt.close(fig); print("[out] retarget_frames3d.png")
+    fig.savefig(out(4, f"retarget_frames3d{TAG}.png"), dpi=120, bbox_inches="tight")
+    plt.close(fig); print(f"[out] 4_retarget_frames3d{TAG}.png")
 
     step = 1
     frames = []
@@ -153,10 +163,10 @@ def main():
         buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
         buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))[..., :3]
         frames.append(buf); plt.close(fig)
-    imageio.mimsave(os.path.join(OUT_DIR,"retarget_motion.gif"), frames, duration=step/FPS)  # real-time
-    print(f"[out] retarget_motion.gif  ({len(frames)} frames, real-time @ {FPS}fps)")
+    imageio.mimsave(out(4, f"retarget_motion{TAG}.gif"), frames, duration=step/FPS)  # real-time
+    print(f"[out] 4_retarget_motion{TAG}.gif  ({len(frames)} frames, real-time @ {FPS}fps)")
 
-    od = os.path.join(OUT_DIR, "retargeted_objs"); os.makedirs(od, exist_ok=True)
+    od = out(4, f"retargeted_objs{TAG}"); os.makedirs(od, exist_ok=True)
     for k in EXPORT_OBJ_FRAMES:
         if k >= T: continue
         with open(os.path.join(od, f"frame_{k:03d}.obj"), "w") as f:

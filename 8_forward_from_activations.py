@@ -33,11 +33,11 @@ import time
 
 import numpy as np
 
-from mri_paths import MRI_OUT, print_paths
+from mri_paths import MRI_OUT, out, print_paths
 import artisynth_forward as fwd
 
 ACT_CSV = os.environ.get(
-    "ACT_CSV", os.path.join(MRI_OUT, "activations_static_per_frame.csv"))
+    "ACT_CSV", out(6, "activations_static_per_frame.csv"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "0"))
 EXPORT_OBJ_EVERY = int(os.environ.get("EXPORT_OBJ_EVERY", "0"))
 # 병렬: 이 워커가 맡을 프레임만 처리(frame_ids[FRAME_WORKER::FRAME_NWORKERS]).
@@ -79,7 +79,7 @@ def main():
     fwd_names = fwd.init()
     print("[fwd] muscle order(model): %s" % ",".join(fwd_names))
 
-    obj_dir = os.path.join(MRI_OUT, "forward_objs")
+    obj_dir = out(8, "forward_objs")
     if EXPORT_OBJ_EVERY > 0:
         os.makedirs(obj_dir, exist_ok=True)
 
@@ -119,16 +119,16 @@ def main():
 
     # ---- 저장 ----
     os.makedirs(MRI_OUT, exist_ok=True)
-    np.save(os.path.join(MRI_OUT, "forward_nodes.npy"), node_pos_all)
-    np.save(os.path.join(MRI_OUT, "forward_node_numbers.npy"), node_numbers)
-    np.save(os.path.join(MRI_OUT, "forward_surface_verts.npy"), surf_verts_all)
-    np.save(os.path.join(MRI_OUT, "forward_surface_faces.npy"), surf_faces)
-    np.save(os.path.join(MRI_OUT, "forward_frame_ids.npy"), frame_ids)
-    np.save(os.path.join(MRI_OUT, "forward_ok.npy"), np.array(ok_flags, dtype=bool))
+    np.save(out(8, "forward_nodes.npy"), node_pos_all)
+    np.save(out(8, "forward_node_numbers.npy"), node_numbers)
+    np.save(out(8, "forward_surface_verts.npy"), surf_verts_all)
+    np.save(out(8, "forward_surface_faces.npy"), surf_faces)
+    np.save(out(8, "forward_frame_ids.npy"), frame_ids)
+    np.save(out(8, "forward_ok.npy"), np.array(ok_flags, dtype=bool))
 
     nfail = int(np.sum(~np.array(ok_flags)))
-    print("[out] forward_nodes.npy %s  (metres)" % (node_pos_all.shape,))
-    print("[out] forward_surface_verts.npy %s + faces %s"
+    print("[out] 8_forward_nodes.npy %s  (metres)" % (node_pos_all.shape,))
+    print("[out] 8_forward_surface_verts.npy %s + faces %s"
           % (surf_verts_all.shape, surf_faces.shape))
     print("DONE. %d frames in %.1fs (%d failed) -> %s"
           % (T, time.time() - t_run, nfail, MRI_OUT))

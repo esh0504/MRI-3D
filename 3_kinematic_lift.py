@@ -23,7 +23,7 @@ import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
-from mri_paths import MRI_OUT, print_paths
+from mri_paths import MRI_OUT, out, print_paths
 
 OUT_DIR  = MRI_OUT
 MM_PER_PX = 1.164      # data-driven, from registration (model tongue size / image span)
@@ -60,12 +60,12 @@ def lift_frame(curve_mm):
 
 def main():
     print_paths()
-    t = np.load(os.path.join(OUT_DIR, "tongue_targets.npy"))   # (T,N,3) px
+    t = np.load(out(1, "tongue_targets.npy"))   # (T,N,3) px
     T, N, _ = t.shape
     xy = t[..., :2] * MM_PER_PX                                 # px->mm
     lifted = np.stack([lift_frame(xy[k]) for k in range(T)], 0) # (T,N,NZ,3)
-    np.save(os.path.join(OUT_DIR, "tongue_lift_3d.npy"), lifted)
-    print(f"[out] tongue_lift_3d.npy  shape {lifted.shape}")
+    np.save(out(3, "tongue_lift_3d.npy"), lifted)
+    print(f"[out] 3_tongue_lift_3d.npy  shape {lifted.shape}")
 
     # consistent axis limits
     P = lifted.reshape(-1, 3)
@@ -87,8 +87,8 @@ def main():
     for j,k in enumerate([0, T//2, T-1]):
         ax = fig.add_subplot(1,3,j+1, projection="3d"); draw(ax, k)
     fig.suptitle("Kinematic symmetric 3D lift (midline red)")
-    fig.savefig(os.path.join(OUT_DIR,"lift_frames3d.png"), dpi=120, bbox_inches="tight")
-    plt.close(fig); print("[out] lift_frames3d.png")
+    fig.savefig(out(3, "lift_frames3d.png"), dpi=120, bbox_inches="tight")
+    plt.close(fig); print("[out] 3_lift_frames3d.png")
 
     # animation GIF (every other frame to keep size down)
     frames = []
@@ -99,8 +99,8 @@ def main():
         buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
         buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))[..., :3]
         frames.append(buf); plt.close(fig)
-    imageio.mimsave(os.path.join(OUT_DIR,"lift_motion.gif"), frames, duration=0.08)
-    print("[out] lift_motion.gif")
+    imageio.mimsave(out(3, "lift_motion.gif"), frames, duration=0.08)
+    print("[out] 3_lift_motion.gif")
 
     disp = np.linalg.norm(lifted - lifted[0:1], axis=3)
     print(f"[stat] lift node max disp {disp.max():.1f}mm, mean per-frame max {disp.max((1,2)).mean():.1f}mm")

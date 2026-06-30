@@ -18,11 +18,16 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import imageio.v2 as imageio
-from mri_paths import MRI_ROOT, MRI_OUT, TONGUE_OBJ, print_paths
+from mri_paths import MRI_ROOT, MRI_OUT, TONGUE_OBJ, out, print_paths
 
 ROOT    = MRI_ROOT
 OUT_DIR = MRI_OUT
 OBJ     = TONGUE_OBJ
+# Match step 4: TARGETS_NPY picks which markers + retarget result to show.
+TARGETS_NPY = os.environ.get("TARGETS_NPY", out(1, "tongue_targets.npy"))
+_stem = os.path.splitext(os.path.basename(TARGETS_NPY))[0]
+_after = _stem.split("tongue_targets")[-1].lstrip("_")
+TAG = ("_" + _after) if _after else ""
 FPS  = 5.0
 STEP = 1                       # 1 = every frame (real-time); 2 = lighter file
 CMAP = ListedColormap(["black","red","green","blue","orange","purple","skyblue"])
@@ -41,8 +46,9 @@ def main():
     fs = sorted(glob.glob(os.path.join(ROOT,"mask_*.mat")), key=natkey)
     masks = [sio.loadmat(f)["mask_frame"] for f in fs]
     T = len(masks)
-    tgt = np.load(os.path.join(OUT_DIR,"tongue_targets.npy"))      # (T,N,3) image px
-    deformed = np.load(os.path.join(OUT_DIR,"retargeted_tongue.npy"))  # (T,Nv,3) mm
+    tgt = np.load(os.path.join(OUT_DIR, TARGETS_NPY))             # (T,N,3) image mm
+    deformed = np.load(out(4, f"retargeted_tongue{TAG}.npy"))     # (T,Nv,3) mm
+    print(f"[in] targets={os.path.basename(TARGETS_NPY)}, retarget=4_retargeted_tongue{TAG}.npy")
     F = load_faces(OBJ)
     H = masks[0].shape[0]
 
@@ -82,10 +88,10 @@ def main():
         buf = buf.reshape(fig.canvas.get_width_height()[::-1]+(4,))[...,:3]
         frames.append(buf); plt.close(fig)
 
-    out = os.path.join(OUT_DIR,"compare_mri_vs_retarget.gif")
-    imageio.mimsave(out, frames, duration=STEP/FPS)   # real-time @ FPS
-    mb = os.path.getsize(out)/1e6
-    print(f"[out] {out}  ({len(frames)} frames, {mb:.1f} MB, real-time @ {FPS}fps)")
+    out_gif = out(5, f"compare_mri_vs_retarget{TAG}.gif")
+    imageio.mimsave(out_gif, frames, duration=STEP/FPS)   # real-time @ FPS
+    mb = os.path.getsize(out_gif)/1e6
+    print(f"[out] {out_gif}  ({len(frames)} frames, {mb:.1f} MB, real-time @ {FPS}fps)")
 
 if __name__ == "__main__":
     main()
